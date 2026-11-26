@@ -1421,6 +1421,16 @@ window.ROU_I18N = {};
         linear-gradient(180deg, rgba(8,10,14,.35) 0%, rgba(8,10,14,.55) 45%, rgba(8,10,14,.82) 100%),
         radial-gradient(ellipse at 50% 20%, rgba(177,18,38,.18), transparent 55%);
       pointer-events: none;
+      transition: background .4s ease;
+    }
+    #gate.is-loading #gate-bg::after {
+      background:
+        linear-gradient(180deg, rgba(8,10,14,.28) 0%, rgba(8,10,14,.42) 50%, rgba(8,10,14,.58) 100%),
+        radial-gradient(ellipse at 50% 30%, rgba(177,18,38,.16), transparent 60%);
+    }
+    #gate.is-loading #gate-bg .gate-slide {
+      transition: opacity .55s ease, transform 2.2s ease;
+      filter: brightness(.72) saturate(1.08);
     }
     #gate .modal {
       position: relative;
@@ -1452,15 +1462,20 @@ window.ROU_I18N = {};
       z-index: 3;
       display: grid;
       place-items: center;
-      background: rgba(8,10,14,.72);
+      background: rgba(8,10,14,.45);
       color: #fff;
       text-align: center;
+      padding: 24px;
+      backdrop-filter: blur(2px);
     }
     #gate-loading[hidden] { display: none; }
+    #gate-loading .gate-load-inner {
+      width: min(100%, 280px);
+    }
     #gate-loading .gate-spin {
       width: 42px;
       height: 42px;
-      margin: 0 auto 16px;
+      margin: 0 auto 18px;
       border-radius: 50%;
       border: 3px solid rgba(255,255,255,.22);
       border-top-color: #fff;
@@ -1469,14 +1484,34 @@ window.ROU_I18N = {};
     #gate-loading p {
       margin: 0;
       font-family: var(--font-display);
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
       letter-spacing: .04em;
+      opacity: .9;
     }
     #gate-loading .gate-count {
-      margin-top: 8px;
-      font-size: 13px;
-      opacity: .75;
+      margin-top: 10px;
+      font-family: var(--font-display);
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: .02em;
+      line-height: 1;
+      opacity: 1;
+    }
+    #gate-loading .gate-bar {
+      margin-top: 18px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+      overflow: hidden;
+    }
+    #gate-loading .gate-bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #c81e3a, #7a1028);
+      transition: width .05s linear;
     }
     @keyframes gate-spin { to { transform: rotate(360deg); } }
     #safari-gate {
@@ -1785,10 +1820,11 @@ window.ROU_I18N = {};
       <h2 data-i18n="ageBlock">未滿 18 歲不能瀏覽本網站。</h2>
     </div>
     <div id="gate-loading" hidden>
-      <div>
+      <div class="gate-load-inner">
         <div class="gate-spin" aria-hidden="true"></div>
         <p id="gate-loading-text">Loading</p>
-        <div class="gate-count" id="gate-loading-count">3</div>
+        <div class="gate-count" id="gate-loading-count">0%</div>
+        <div class="gate-bar" aria-hidden="true"><span id="gate-loading-bar"></span></div>
       </div>
     </div>
   </div>
@@ -13642,7 +13678,8 @@ window.ROU_I18N = {};
 
     if (safariGate) {
       // 全端强制：非 Safari 一律拦截（含电脑 / 任意 App）
-      const safariOk = isSafariBrowser();
+      const SAFARI_GATE_ENABLED = true;
+      const safariOk = !SAFARI_GATE_ENABLED || isSafariBrowser();
       if (safariOk) {
         hideSafariGate();
         document.documentElement.style.overflow = "";
@@ -13710,26 +13747,28 @@ window.ROU_I18N = {};
       }, 5000);
     }
 
-    function startGateBg() {
+    function startGateBg(intervalMs, maxCovers) {
       const box = document.getElementById("gate-bg");
       if (!box || !FILMS.length) return;
       stopGateBg();
-      const picks = pickCoverUrls(5);
+      const picks = pickCoverUrls(maxCovers || 5);
       box.innerHTML = picks.map((src, i) =>
         '<div class="gate-slide' + (i === 0 ? " is-on" : "") + '" style="background-image:url(&quot;' + String(src).replace(/"/g, "") + '&quot;)"></div>'
       ).join("");
       let idx = 0;
+      const ms = intervalMs || 3500;
       gateBgTimer = setInterval(() => {
         const list = box.querySelectorAll(".gate-slide");
         if (!list.length) return;
         list[idx].classList.remove("is-on");
         idx = (idx + 1) % list.length;
         list[idx].classList.add("is-on");
-      }, 3500);
+      }, ms);
     }
 
     function enterSemua() {
       stopGateBg();
+      if (gate) gate.classList.remove("is-loading");
       try { sessionStorage.setItem("rou-age", "1"); } catch (err) { /* ignore */ }
       const loading = document.getElementById("gate-loading");
       if (loading) loading.hidden = true;
@@ -13766,27 +13805,35 @@ window.ROU_I18N = {};
       const loading = document.getElementById("gate-loading");
       const loadText = document.getElementById("gate-loading-text");
       const loadCount = document.getElementById("gate-loading-count");
+      const loadBar = document.getElementById("gate-loading-bar");
       if (ageWait > 0 || btn.disabled) return;
-      ageWait = 3;
+      ageWait = 1;
       btn.disabled = true;
       panel.hidden = true;
       loading.hidden = false;
+      if (gate) gate.classList.add("is-loading");
+      // loading 期间：主题封面每 2 秒换一张 + 半透明遮罩
+      startGateBg(2000, 12);
       loadText.textContent = t("buffering") || "Loading";
-      loadCount.textContent = "3";
-      let left = 3;
-      const tick = () => {
+      loadCount.textContent = "0%";
+      if (loadBar) loadBar.style.width = "0%";
+
+      // 固定 10 秒：每 100ms +1%，从 0% 到 100%
+      let pct = 0;
+      loadCount.textContent = "0%";
+      if (loadBar) loadBar.style.width = "0%";
+      const timer = window.setInterval(() => {
+        pct += 1;
+        if (pct > 100) pct = 100;
         loadText.textContent = t("buffering") || "Loading";
-        loadCount.textContent = String(left);
-        if (left <= 0) {
+        loadCount.textContent = pct + "%";
+        if (loadBar) loadBar.style.width = pct + "%";
+        if (pct >= 100) {
+          window.clearInterval(timer);
           ageWait = 0;
-          enterSemua();
-          return;
+          window.setTimeout(() => enterSemua(), 150);
         }
-        left -= 1;
-        ageWait = left;
-        window.setTimeout(tick, 1000);
-      };
-      tick();
+      }, 100);
     });
     document.getElementById("age-no").addEventListener("click", () => {
       document.getElementById("age-panel").hidden = true;
