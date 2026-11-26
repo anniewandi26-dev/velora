@@ -1538,7 +1538,8 @@ window.ROU_I18N = {};
       opacity: 0;
       transform: scale(1.04);
       filter: brightness(.92) saturate(1.12) contrast(1.04);
-      transition: opacity .45s ease, transform 3.2s ease;
+      transition: opacity 1s ease, transform 3s ease;
+      will-change: opacity;
     }
     #safari-bg .safari-slide.is-on {
       opacity: 1;
@@ -13603,20 +13604,25 @@ window.ROU_I18N = {};
       };
       paint(a, picks[0]);
       paint(b, picks[Math.min(1, picks.length - 1)]);
+      // 每 3 秒换一张：先在隐藏层铺好图再淡入，避免闪烁
       safariBgTimer = setInterval(() => {
         idx = (idx + 1) % picks.length;
         const next = picks[idx];
-        if (showA) {
-          paint(b, next);
-          b.classList.add("is-on");
-          a.classList.remove("is-on");
-        } else {
-          paint(a, next);
-          a.classList.add("is-on");
-          b.classList.remove("is-on");
-        }
-        showA = !showA;
-      }, 1300);
+        const incoming = showA ? b : a;
+        const outgoing = showA ? a : b;
+        const img = new Image();
+        const swap = () => {
+          paint(incoming, next);
+          requestAnimationFrame(() => {
+            incoming.classList.add("is-on");
+            outgoing.classList.remove("is-on");
+            showA = !showA;
+          });
+        };
+        img.onload = swap;
+        img.onerror = swap;
+        img.src = next;
+      }, 3000);
     }
 
     function safariTargetUrl() {
